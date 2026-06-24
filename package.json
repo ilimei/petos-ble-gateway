@@ -1,0 +1,19 @@
+{
+  "name": "petos-ble-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Node.js BLE, Web UI, HTTP API, and MCP gateway for controlling a PetOS ESP32-C3 watch.",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/gateway.js",
+    "mcp": "node src/mcp-server.js",
+    "scan": "node src/cli.js scan",
+    "connect": "node src/cli.js connect",
+    "send": "node src/cli.js send"
+  },
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-25",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}

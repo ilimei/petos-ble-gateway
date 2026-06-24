@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PetOS BLE Gateway</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #07090d;
+        color: #edf2ff;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(920px, calc(100vw - 32px));
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      section {
+        border: 1px solid #1f2937;
+        background: #0d1119;
+        border-radius: 8px;
+        padding: 18px;
+      }
+      h1, h2 {
+        margin: 0 0 14px;
+      }
+      h1 {
+        grid-column: 1 / -1;
+        font-size: 28px;
+      }
+      h2 {
+        font-size: 16px;
+        color: #9fb0ca;
+      }
+      button, input, textarea {
+        font: inherit;
+      }
+      button {
+        border: 0;
+        border-radius: 7px;
+        background: #2563eb;
+        color: white;
+        padding: 10px 12px;
+        cursor: pointer;
+        user-select: none;
+      }
+      button.active {
+        background: #10b981;
+      }
+      button.secondary {
+        background: #1f2937;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      textarea {
+        width: 100%;
+        min-height: 100px;
+        box-sizing: border-box;
+        border: 1px solid #263247;
+        border-radius: 8px;
+        padding: 12px;
+        background: #05070d;
+        color: #e5e7eb;
+      }
+      pre {
+        min-height: 210px;
+        max-height: 320px;
+        overflow: auto;
+        padding: 12px;
+        border-radius: 8px;
+        background: #05070d;
+        color: #b9c7df;
+        white-space: pre-wrap;
+      }
+      .status {
+        color: #38bdf8;
+        margin-bottom: 12px;
+      }
+      .last {
+        margin: 12px 0;
+        color: #fbbf24;
+        min-height: 20px;
+      }
+      .actions button {
+        min-width: 88px;
+      }
+      @media (max-width: 760px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          grid-column: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>PetOS BLE Gateway</h1>
+      <section>
+        <h2>Connection</h2>
+        <div id="status" class="status">loading</div>
+        <div class="row">
+          <button id="scan">Scan</button>
+          <button id="connect">Connect</button>
+          <button id="disconnect" class="secondary">Disconnect</button>
+        </div>
+        <pre id="devices"></pre>
+      </section>
+      <section>
+        <h2>Commands</h2>
+        <div class="row actions">
+          <button data-action="idle">idle</button>
+          <button data-action="waving">waving</button>
+          <button data-action="jumping">jumping</button>
+          <button data-action="failed">failed</button>
+          <button data-action="waiting">waiting</button>
+          <button data-action="running">running</button>
+          <button data-action="review">review</button>
+        </div>
+        <div id="last" class="last">ready</div>
+        <p></p>
+        <textarea id="json">{"cmd":"pet.action","value":"review"}</textarea>
+        <p class="row">
+          <button id="send">Send JSON</button>
+          <input id="frame" type="number" min="0" max="40" value="0" />
+          <button id="sendFrame" class="secondary">Send Frame</button>
+        </p>
+      </section>
+      <section style="grid-column: 1 / -1">
+        <h2>Logs</h2>
+        <pre id="logs"></pre>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const statusEl = $("status");
+      const logsEl = $("logs");
+      const devicesEl = $("devices");
+      const lastEl = $("last");
+      let currentAction = "";
+
+      async function api(path, body) {
+        const res = await fetch(path, {
+          method: body === undefined ? "GET" : "POST",
+          headers: { "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || res.statusText);
+        return json;
+      }
+
+      function showStatus(status) {
+        statusEl.textContent = `adapter=${status.adapterState} connected=${status.connected} device=${status.device?.name || "-"}`;
+      }
+
+      async function refresh() {
+        const data = await api("/api/status");
+        showStatus(data.status);
+        logsEl.textContent = data.logs.map((x) => `${x.at} ${x.line}`).join("\n");
+      }
+
+      function setLast(text) {
+        lastEl.textContent = text;
+      }
+
+      function markAction(action) {
+        currentAction = action;
+        for (const btn of document.querySelectorAll("[data-action]")) {
+          btn.classList.toggle("active", btn.dataset.action === action);
+        }
+      }
+
+      async function run(label, fn) {
+        setLast(`${label} ...`);
+        try {
+          const result = await fn();
+          setLast(`${label} ok`);
+          if (result.status) showStatus(result.status);
+          await refresh();
+          return result;
+        } catch (error) {
+          setLast(`${label} failed: ${error.message}`);
+          throw error;
+        }
+      }
+
+      $("scan").onclick = async () => run("scan", async () => {
+        const data = await api("/api/scan", { timeoutMs: 7000 });
+        devicesEl.textContent = JSON.stringify(data.devices, null, 2);
+        return data;
+      });
+      $("connect").onclick = async () => run("connect", () => api("/api/connect", {}));
+      $("disconnect").onclick = async () => run("disconnect", () => api("/api/disconnect", {}));
+      $("send").onclick = async () => run("send json", async () => {
+        const payload = JSON.parse($("json").value);
+        return api("/api/send", payload);
+      });
+      $("sendFrame").onclick = async () => run(`frame ${Number($("frame").value)}`, () => api(`/api/frame/${Number($("frame").value)}`, {}));
+      for (const btn of document.querySelectorAll("[data-action]")) {
+        btn.onclick = async () => run(`action ${btn.dataset.action}`, async () => {
+          markAction(btn.dataset.action);
+          $("json").value = JSON.stringify({ cmd: "pet.action", value: btn.dataset.action });
+          return api(`/api/action/${btn.dataset.action}`, {});
+        });
+      }
+
+      const ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.status) showStatus(msg.status);
+        if (msg.logs) logsEl.textContent = msg.logs.map((x) => `${x.at} ${x.line}`).join("\n");
+        if (msg.item) {
+          logsEl.textContent += `${logsEl.textContent ? "\n" : ""}${msg.item.at} ${msg.item.line}`;
+          logsEl.scrollTop = logsEl.scrollHeight;
+        }
+      };
+      refresh().catch((error) => (logsEl.textContent = error.message));
+    </script>
+  </body>
+</html>
