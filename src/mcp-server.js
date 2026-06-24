@@ -54,6 +54,18 @@ const tools = [
       required: ["frame"],
     },
   },
+  {
+    name: "petos_show_text",
+    description: "Show multiline text on the watch page. Supports LVGL recolor tags like #22c55e text#.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short page title." },
+        text: { type: "string", description: "Multiline text to show on the second page." },
+      },
+      required: ["text"],
+    },
+  },
 ];
 
 async function request(path, body) {
@@ -74,6 +86,7 @@ async function callTool(name, args = {}) {
   if (name === "petos_send_json") return request("/api/send", args.payload);
   if (name === "petos_play_action") return request(`/api/action/${encodeURIComponent(args.action)}`, {});
   if (name === "petos_show_frame") return request(`/api/frame/${Number(args.frame)}`, {});
+  if (name === "petos_show_text") return request("/api/watch/text", { title: args.title || "PetOS", text: args.text });
   throw new Error(`Unknown tool: ${name}`);
 }
 

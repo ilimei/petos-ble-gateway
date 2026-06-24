@@ -49,6 +49,10 @@ app.post("/api/disconnect", asyncRoute(async () => ({ ok: true, status: await bl
 app.post("/api/send", asyncRoute(async (req) => ble.sendJson(req.body)));
 app.post("/api/frame/:frame", asyncRoute(async (req) => ble.sendJson({ cmd: "pet.frame", value: Number(req.params.frame) })));
 app.post("/api/action/:action", asyncRoute(async (req) => ble.sendJson({ cmd: "pet.action", value: req.params.action })));
+app.post("/api/watch/text", asyncRoute(async (req) => {
+  const { title = "PetOS", text = "" } = req.body || {};
+  return ble.sendJson({ cmd: "watch.text", title, text });
+}));
 
 wss.on("connection", (socket) => {
   socket.send(JSON.stringify({ type: "hello", logs, status: ble.status(), petos: PETOS }));

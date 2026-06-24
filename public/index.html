@@ -96,6 +96,23 @@
       .actions button {
         min-width: 88px;
       }
+      .field {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .field label {
+        color: #9fb0ca;
+        font-size: 13px;
+      }
+      input {
+        box-sizing: border-box;
+        border: 1px solid #263247;
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: #05070d;
+        color: #e5e7eb;
+      }
       @media (max-width: 760px) {
         main {
           grid-template-columns: 1fr;
@@ -137,6 +154,23 @@
           <button id="send">Send JSON</button>
           <input id="frame" type="number" min="0" max="40" value="0" />
           <button id="sendFrame" class="secondary">Send Frame</button>
+        </p>
+      </section>
+      <section>
+        <h2>Watch Page Text</h2>
+        <div class="field">
+          <label for="watchTitle">Title</label>
+          <input id="watchTitle" value="Market" />
+        </div>
+        <div class="field">
+          <label for="watchText">Text supports \n and LVGL recolor tags</label>
+          <textarea id="watchText">#22c55e CPO +2.3%#
+#f97316 NVDA +1.1%#
+#38bdf8 PetOS running#</textarea>
+        </div>
+        <p class="row">
+          <button id="sendWatchText">Send Watch Text</button>
+          <button id="copyWatchJson" class="secondary">Copy to JSON</button>
         </p>
       </section>
       <section style="grid-column: 1 / -1">
@@ -210,6 +244,18 @@
         return api("/api/send", payload);
       });
       $("sendFrame").onclick = async () => run(`frame ${Number($("frame").value)}`, () => api(`/api/frame/${Number($("frame").value)}`, {}));
+      $("sendWatchText").onclick = async () => run("watch text", () => api("/api/watch/text", {
+        title: $("watchTitle").value,
+        text: $("watchText").value,
+      }));
+      $("copyWatchJson").onclick = () => {
+        $("json").value = JSON.stringify({
+          cmd: "watch.text",
+          title: $("watchTitle").value,
+          text: $("watchText").value,
+        });
+        setLast("watch text copied to JSON");
+      };
       for (const btn of document.querySelectorAll("[data-action]")) {
         btn.onclick = async () => run(`action ${btn.dataset.action}`, async () => {
           markAction(btn.dataset.action);

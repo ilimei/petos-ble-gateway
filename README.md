@@ -56,7 +56,7 @@ Open:
 http://127.0.0.1:8787
 ```
 
-The page lets you scan, connect, send named actions, send a fixed frame, or write raw JSON.
+The page lets you scan, connect, send named actions, send a fixed frame, update the watch text page, or write raw JSON.
 
 ## CLI Smoke Tests
 
@@ -95,6 +95,20 @@ Show one fixed frame:
 ```json
 {"cmd":"pet.frame","value":12}
 ```
+
+Show multiline text on the second watch page:
+
+```json
+{"cmd":"watch.text","title":"Market","text":"#22c55e CPO +2.3%#\n#f97316 NVDA +1.1%#"}
+```
+
+The watch firmware supports LVGL label recolor syntax for simple rich text:
+
+```text
+#22c55e green text# #f97316 orange text#
+```
+
+This is not HTML or Markdown. It supports multiline text and color spans, but not mixed font sizes, bold text, or embedded images.
 
 Supported actions in the current firmware:
 
@@ -146,6 +160,14 @@ curl -X POST http://127.0.0.1:8787/api/send \
   -d '{"cmd":"pet.frame","value":12}'
 ```
 
+Update the second watch page text:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/watch/text \
+  -H 'content-type: application/json' \
+  -d '{"title":"Market","text":"#22c55e CPO +2.3%#\n#f97316 NVDA +1.1%#"}'
+```
+
 ## MCP Server
 
 Start the gateway first:
@@ -174,6 +196,7 @@ Available MCP tools:
 - `petos_send_json`
 - `petos_play_action`
 - `petos_show_frame`
+- `petos_show_text`
 
 The MCP server calls the local gateway at `http://127.0.0.1:8787` by default. Override with:
 
