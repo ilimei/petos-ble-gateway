@@ -80,6 +80,36 @@ const tools = [
       required: ["file"],
     },
   },
+  {
+    name: "petos_pack_rle",
+    description: "Download a Codex pet and pack it into a watch-ready PTOSIDX1 .idxrle file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Codex pet name, for example cloud-strife." },
+        colors: { type: "number", description: "Palette size. Default 24." },
+        size: { type: "number", description: "Frame canvas size. Default 200." },
+        includeRuns: { type: "boolean", description: "Include run_right/run_left rows. Default false." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "petos_pack_upload_pet",
+    description: "Pack a Codex pet into .idxrle and upload it to the watch over BLE.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Codex pet name, for example cloud-strife." },
+        colors: { type: "number", description: "Palette size. Default 24." },
+        size: { type: "number", description: "Frame canvas size. Default 200." },
+        includeRuns: { type: "boolean", description: "Include run_right/run_left rows. Default false." },
+        chunkSize: { type: "number", description: "BLE payload bytes per chunk. Default 160." },
+        delayMs: { type: "number", description: "Delay between chunks in milliseconds. Default 10." },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
 async function request(path, body) {
@@ -105,6 +135,26 @@ async function uploadFile(path, { chunkSize = 160, delayMs = 10 } = {}) {
   return json;
 }
 
+async function packPet(args = {}) {
+  return request("/api/rle/pack", {
+    name: args.name,
+    colors: args.colors || 24,
+    size: args.size || 200,
+    includeRuns: Boolean(args.includeRuns),
+  });
+}
+
+async function packUploadPet(args = {}) {
+  return request("/api/rle/pack-upload", {
+    name: args.name,
+    colors: args.colors || 24,
+    size: args.size || 200,
+    includeRuns: Boolean(args.includeRuns),
+    chunkSize: args.chunkSize || 160,
+    delayMs: args.delayMs || 10,
+  });
+}
+
 async function callTool(name, args = {}) {
   if (name === "petos_status") return request("/api/status");
   if (name === "petos_scan") return request("/api/scan", { timeoutMs: args.timeoutMs || 7000 });
@@ -114,6 +164,8 @@ async function callTool(name, args = {}) {
   if (name === "petos_show_frame") return request(`/api/frame/${Number(args.frame)}`, {});
   if (name === "petos_show_text") return request("/api/watch/text", { title: args.title || "PetOS", text: args.text });
   if (name === "petos_upload_rle") return uploadFile(args.file, args);
+  if (name === "petos_pack_rle") return packPet(args);
+  if (name === "petos_pack_upload_pet") return packUploadPet(args);
   throw new Error(`Unknown tool: ${name}`);
 }
 

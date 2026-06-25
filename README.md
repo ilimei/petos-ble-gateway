@@ -57,7 +57,7 @@ http://127.0.0.1:8787
 ```
 
 The page lets you scan, connect, send named actions, send a fixed frame, update the watch text page, or write raw JSON.
-It can also upload a `.idxrle` pet package to the watch over BLE.
+It can also pack Codex pets into `.idxrle` packages and upload them to the watch over BLE.
 
 ## CLI Smoke Tests
 
@@ -84,6 +84,20 @@ Upload a pet RLE package:
 ```bash
 npm run upload -- /absolute/path/to/pet.idxrle
 ```
+
+Pack a Codex pet into a watch-ready RLE package:
+
+```bash
+npm run pack -- cloud-strife
+```
+
+Pack and upload in one command:
+
+```bash
+npm run pack-upload -- cloud-strife
+```
+
+The packer uses the standard Codex pet `8x9` sprite sheet layout, removes empty cells, resizes frames to `200x200`, defaults to `24` colors, and excludes `run_right` / `run_left` for the watch package.
 
 ## BLE JSON Protocol
 
@@ -209,6 +223,22 @@ curl -X POST 'http://127.0.0.1:8787/api/rle/upload?chunkSize=160&delayMs=10' \
   --data-binary @/absolute/path/to/pet.idxrle
 ```
 
+Pack a Codex pet:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/rle/pack \
+  -H 'content-type: application/json' \
+  -d '{"name":"cloud-strife","colors":24,"size":200}'
+```
+
+Pack and upload:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/rle/pack-upload \
+  -H 'content-type: application/json' \
+  -d '{"name":"cloud-strife","colors":24,"size":200,"chunkSize":160,"delayMs":10}'
+```
+
 ## MCP Server
 
 Start the gateway first:
@@ -239,6 +269,8 @@ Available MCP tools:
 - `petos_show_frame`
 - `petos_show_text`
 - `petos_upload_rle`
+- `petos_pack_rle`
+- `petos_pack_upload_pet`
 
 The MCP server calls the local gateway at `http://127.0.0.1:8787` by default. Override with:
 

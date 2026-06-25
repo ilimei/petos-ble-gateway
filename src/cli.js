@@ -1,4 +1,5 @@
 import { PetosBleClient } from "./ble-client.js";
+import { packCodexPet } from "./rle-pack.js";
 import fs from "node:fs/promises";
 
 const ble = new PetosBleClient();
@@ -29,8 +30,30 @@ try {
       },
     });
     console.log(JSON.stringify(result, null, 2));
+  } else if (cmd === "pack") {
+    const name = args[0];
+    if (!name) throw new Error("Usage: node src/cli.js pack cloud-strife [colors]");
+    const result = await packCodexPet({ name, colors: Number(args[1] || 24) });
+    console.log(JSON.stringify(result, null, 2));
+  } else if (cmd === "pack-upload") {
+    const name = args[0];
+    if (!name) throw new Error("Usage: node src/cli.js pack-upload cloud-strife [colors]");
+    const packed = await packCodexPet({ name, colors: Number(args[1] || 24) });
+    console.error(`[petos] packed ${packed.file} ${packed.bytes} bytes`);
+    const data = await fs.readFile(packed.file);
+    let lastPct = -1;
+    const upload = await ble.uploadRle(data, {
+      onProgress: ({ sent, total, percent }) => {
+        const pct = Math.floor(percent * 100);
+        if (pct >= lastPct + 5 || sent === total) {
+          lastPct = pct;
+          console.error(`[petos] upload ${pct}% ${sent}/${total}`);
+        }
+      },
+    });
+    console.log(JSON.stringify({ ok: true, packed, upload }, null, 2));
   } else {
-    console.error("Usage: node src/cli.js scan|connect|send '{\"cmd\":\"pet.action\",\"value\":\"review\"}'|upload pet.idxrle");
+    console.error("Usage: node src/cli.js scan|connect|send '{\"cmd\":\"pet.action\",\"value\":\"review\"}'|upload pet.idxrle|pack cloud-strife|pack-upload cloud-strife");
     process.exit(2);
   }
 } catch (error) {

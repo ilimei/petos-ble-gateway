@@ -10,7 +10,9 @@
     "scan": "node src/cli.js scan",
     "connect": "node src/cli.js connect",
     "send": "node src/cli.js send",
-    "upload": "node src/cli.js upload"
+    "upload": "node src/cli.js upload",
+    "pack": "node src/cli.js pack",
+    "pack-upload": "node src/cli.js pack-upload"
   },
   "dependencies": {
     "@abandonware/noble": "^1.9.2-25",

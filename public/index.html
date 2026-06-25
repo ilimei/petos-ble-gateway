@@ -197,6 +197,31 @@
         </p>
         <progress id="uploadProgress" value="0" max="100"></progress>
       </section>
+      <section>
+        <h2>Pack Codex Pet</h2>
+        <div class="field">
+          <label for="petName">Pet name</label>
+          <input id="petName" value="cloud-strife" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="packColors">Colors</label>
+            <input id="packColors" type="number" min="2" max="256" value="24" />
+          </div>
+          <div class="field">
+            <label for="packSize">Size</label>
+            <input id="packSize" type="number" min="64" max="240" value="200" />
+          </div>
+        </div>
+        <p class="row">
+          <label><input id="includeRuns" type="checkbox" /> include left/right run</label>
+        </p>
+        <p class="row">
+          <button id="packPet">Pack</button>
+          <button id="packUploadPet">Pack + Upload</button>
+        </p>
+        <pre id="packResult"></pre>
+      </section>
       <section style="grid-column: 1 / -1">
         <h2>Logs</h2>
         <pre id="logs"></pre>
@@ -299,6 +324,28 @@
         const delayMs = Number($("delayMs").value || 10);
         const data = await uploadRaw(`/api/rle/upload?chunkSize=${chunkSize}&delayMs=${delayMs}`, file);
         $("uploadProgress").value = 100;
+        return data;
+      });
+      function packPayload() {
+        return {
+          name: $("petName").value.trim(),
+          colors: Number($("packColors").value || 24),
+          size: Number($("packSize").value || 200),
+          includeRuns: $("includeRuns").checked,
+          chunkSize: Number($("chunkSize").value || 160),
+          delayMs: Number($("delayMs").value || 10),
+        };
+      }
+      $("packPet").onclick = async () => run("pack pet", async () => {
+        const data = await api("/api/rle/pack", packPayload());
+        $("packResult").textContent = JSON.stringify(data, null, 2);
+        return data;
+      });
+      $("packUploadPet").onclick = async () => run("pack upload pet", async () => {
+        $("uploadProgress").value = 0;
+        const data = await api("/api/rle/pack-upload", packPayload());
+        $("uploadProgress").value = 100;
+        $("packResult").textContent = JSON.stringify(data, null, 2);
         return data;
       });
       for (const btn of document.querySelectorAll("[data-action]")) {

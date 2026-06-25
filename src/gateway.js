@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { DEFAULT_PORT, PETOS } from "./config.js";
 import { PetosBleClient } from "./ble-client.js";
+import { packCodexPet } from "./rle-pack.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "..", "public");
@@ -62,6 +63,31 @@ app.post("/api/rle/upload", express.raw({ type: "application/octet-stream", limi
       }
     },
   });
+}));
+app.post("/api/rle/pack", asyncRoute(async (req) => {
+  const { name, colors = 24, size = 200, includeRuns = false } = req.body || {};
+  const result = await packCodexPet({ name, colors, size, includeRuns, outDir: path.join(__dirname, "..", "packed") });
+  log(`packed ${result.name} ${result.frames} frames ${result.bytes} bytes -> ${result.file}`);
+  return result;
+}));
+app.post("/api/rle/pack-upload", asyncRoute(async (req) => {
+  const { name, colors = 24, size = 200, includeRuns = false, chunkSize = 160, delayMs = 10 } = req.body || {};
+  const packed = await packCodexPet({ name, colors, size, includeRuns, outDir: path.join(__dirname, "..", "packed") });
+  log(`packed ${packed.name} ${packed.frames} frames ${packed.bytes} bytes -> ${packed.file}`);
+  const data = await import("node:fs/promises").then((fs) => fs.readFile(packed.file));
+  let lastPct = -1;
+  const upload = await ble.uploadRle(data, {
+    chunkSize: Number(chunkSize),
+    delayMs: Number(delayMs),
+    onProgress: ({ sent, total, percent }) => {
+      const pct = Math.floor(percent * 100);
+      if (pct >= lastPct + 5 || sent === total) {
+        lastPct = pct;
+        log(`rle upload ${pct}% ${sent}/${total}`);
+      }
+    },
+  });
+  return { ok: true, packed, upload };
 }));
 app.post("/api/watch/text", asyncRoute(async (req) => {
   const { title = "PetOS", text = "" } = req.body || {};
