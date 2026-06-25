@@ -7,6 +7,13 @@ ble.on("log", (line) => console.error(`[petos] ${line}`));
 
 const [cmd, ...args] = process.argv.slice(2);
 
+function packArgs() {
+  const name = args[0];
+  const force = args.includes("--force");
+  const colorArg = args.slice(1).find((x) => x !== "--force");
+  return { name, colors: Number(colorArg || 24), force };
+}
+
 try {
   if (cmd === "scan") {
     console.log(JSON.stringify(await ble.scan({ timeoutMs: Number(args[0] || 7000) }), null, 2));
@@ -31,15 +38,15 @@ try {
     });
     console.log(JSON.stringify(result, null, 2));
   } else if (cmd === "pack") {
-    const name = args[0];
-    if (!name) throw new Error("Usage: node src/cli.js pack cloud-strife [colors]");
-    const result = await packCodexPet({ name, colors: Number(args[1] || 24) });
+    const { name, colors, force } = packArgs();
+    if (!name) throw new Error("Usage: node src/cli.js pack cloud-strife [colors] [--force]");
+    const result = await packCodexPet({ name, colors, force });
     console.log(JSON.stringify(result, null, 2));
   } else if (cmd === "pack-upload") {
-    const name = args[0];
-    if (!name) throw new Error("Usage: node src/cli.js pack-upload cloud-strife [colors]");
-    const packed = await packCodexPet({ name, colors: Number(args[1] || 24) });
-    console.error(`[petos] packed ${packed.file} ${packed.bytes} bytes`);
+    const { name, colors, force } = packArgs();
+    if (!name) throw new Error("Usage: node src/cli.js pack-upload cloud-strife [colors] [--force]");
+    const packed = await packCodexPet({ name, colors, force });
+    console.error(`[petos] ${packed.cached ? "reused" : "packed"} ${packed.file} ${packed.bytes} bytes`);
     const data = await fs.readFile(packed.file);
     let lastPct = -1;
     const upload = await ble.uploadRle(data, {

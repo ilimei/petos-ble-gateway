@@ -44,6 +44,56 @@ ble.on("log", log);
 
 app.use(express.json({ limit: "64kb" }));
 app.use(express.static(publicDir));
+app.use("/packed", express.static(packedDir));
+
+function encodePathSegments(value) {
+  return value.split(path.sep).map(encodeURIComponent).join("/");
+}
+
+async function findPreviewForPackage(file) {
+  const dir = path.dirname(file);
+  const base = path.basename(file, ".idxrle");
+  const parts = base.split("_");
+  const size = parts.pop();
+  const suffix = parts.pop();
+  const candidates = [
+    path.join(dir, `frames_${size}_${suffix}`, "frame_000.png"),
+    path.join(dir, "frames_200_watch-no-lr", "frame_000.png"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return `/packed/${encodePathSegments(path.relative(packedDir, candidate))}`;
+    } catch {
+      // Keep looking for a sibling frame directory below.
+    }
+  }
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries.filter((x) => x.isDirectory() && x.name.startsWith("frames_")).sort((a, b) => a.name.localeCompare(b.name))) {
+      const candidate = path.join(dir, entry.name, "frame_000.png");
+      try {
+        await fs.access(candidate);
+        return `/packed/${encodePathSegments(path.relative(packedDir, candidate))}`;
+      } catch {
+        // Continue scanning.
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function resolvePackedFile(relative) {
+  if (!relative || typeof relative !== "string") throw new Error("file is required");
+  const full = path.resolve(packedDir, relative);
+  const root = path.resolve(packedDir);
+  if (full !== root && !full.startsWith(`${root}${path.sep}`)) throw new Error("file must be inside packed directory");
+  if (!full.endsWith(".idxrle")) throw new Error("file must be an .idxrle package");
+  await fs.access(full);
+  return full;
+}
 
 app.get("/api/status", asyncRoute(async () => ({ ok: true, petos: PETOS, logs, status: ble.status() })));
 app.get("/api/rle/packages", asyncRoute(async () => {
@@ -65,6 +115,7 @@ app.get("/api/rle/packages", asyncRoute(async () => {
           name: entry.name,
           file: full,
           relative: path.relative(packedDir, full),
+          previewUrl: await findPreviewForPackage(full),
           bytes: stat.size,
           updatedAt: stat.mtime.toISOString(),
         });
@@ -95,16 +146,34 @@ app.post("/api/rle/upload", express.raw({ type: "application/octet-stream", limi
     },
   });
 }));
+app.post("/api/rle/upload-file", asyncRoute(async (req) => {
+  const { file, chunkSize = 160, delayMs = 10 } = req.body || {};
+  const full = await resolvePackedFile(file);
+  const data = await fs.readFile(full);
+  let lastPct = -1;
+  log(`upload saved ${path.relative(packedDir, full)} ${data.length} bytes`);
+  return ble.uploadRle(data, {
+    chunkSize: Number(chunkSize),
+    delayMs: Number(delayMs),
+    onProgress: ({ sent, total, percent }) => {
+      const pct = Math.floor(percent * 100);
+      if (pct >= lastPct + 5 || sent === total) {
+        lastPct = pct;
+        log(`rle upload ${pct}% ${sent}/${total}`);
+      }
+    },
+  });
+}));
 app.post("/api/rle/pack", asyncRoute(async (req) => {
-  const { name, colors = 24, size = 200, includeRuns = false } = req.body || {};
-  const result = await packCodexPet({ name, colors, size, includeRuns, outDir: packedDir });
-  log(`packed ${result.name} ${result.frames} frames ${result.bytes} bytes -> ${result.file}`);
+  const { name, colors = 24, size = 200, includeRuns = false, force = false } = req.body || {};
+  const result = await packCodexPet({ name, colors, size, includeRuns, force, outDir: packedDir });
+  log(`${result.cached ? "reused" : "packed"} ${result.name} ${result.frames} frames ${result.bytes} bytes -> ${result.file}`);
   return result;
 }));
 app.post("/api/rle/pack-upload", asyncRoute(async (req) => {
-  const { name, colors = 24, size = 200, includeRuns = false, chunkSize = 160, delayMs = 10 } = req.body || {};
-  const packed = await packCodexPet({ name, colors, size, includeRuns, outDir: packedDir });
-  log(`packed ${packed.name} ${packed.frames} frames ${packed.bytes} bytes -> ${packed.file}`);
+  const { name, colors = 24, size = 200, includeRuns = false, force = false, chunkSize = 160, delayMs = 10 } = req.body || {};
+  const packed = await packCodexPet({ name, colors, size, includeRuns, force, outDir: packedDir });
+  log(`${packed.cached ? "reused" : "packed"} ${packed.name} ${packed.frames} frames ${packed.bytes} bytes -> ${packed.file}`);
   const data = await fs.readFile(packed.file);
   let lastPct = -1;
   const upload = await ble.uploadRle(data, {

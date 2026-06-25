@@ -57,7 +57,7 @@ http://127.0.0.1:8787
 ```
 
 The page lets you scan, connect, send named actions, send a fixed frame, update the watch text page, or write raw JSON.
-It can also pack Codex pets into `.idxrle` packages and upload them to the watch over BLE.
+It can also pack Codex pets into `.idxrle` packages, list saved packages with a preview frame, and upload a saved package to the watch over BLE.
 
 ## CLI Smoke Tests
 
@@ -98,6 +98,11 @@ npm run pack-upload -- cloud-strife
 ```
 
 The packer uses the standard Codex pet `8x9` sprite sheet layout, removes empty cells, resizes frames to `200x200`, defaults to `24` colors, and excludes `run_right` / `run_left` for the watch package.
+Packed packages are saved under `packed/<pet>/`. Running the same pet/settings again reuses the matching `.idxrle`; add `--force` to rebuild:
+
+```bash
+npm run pack -- cloud-strife --force
+```
 
 ## BLE JSON Protocol
 
@@ -221,6 +226,20 @@ Upload an `.idxrle` file:
 curl -X POST 'http://127.0.0.1:8787/api/rle/upload?chunkSize=160&delayMs=10' \
   -H 'content-type: application/octet-stream' \
   --data-binary @/absolute/path/to/pet.idxrle
+```
+
+List saved packages:
+
+```bash
+curl http://127.0.0.1:8787/api/rle/packages
+```
+
+Upload a saved package from `packed/`:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/rle/upload-file \
+  -H 'content-type: application/json' \
+  -d '{"file":"cloud-strife/cloud-strife_watch-no-lr_200_24.idxrle","chunkSize":160,"delayMs":10}'
 ```
 
 Pack a Codex pet:

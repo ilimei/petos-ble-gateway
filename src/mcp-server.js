@@ -90,6 +90,7 @@ const tools = [
         colors: { type: "number", description: "Palette size. Default 24." },
         size: { type: "number", description: "Frame canvas size. Default 200." },
         includeRuns: { type: "boolean", description: "Include run_right/run_left rows. Default false." },
+        force: { type: "boolean", description: "Rebuild even when a matching .idxrle already exists. Default false." },
       },
       required: ["name"],
     },
@@ -104,6 +105,7 @@ const tools = [
         colors: { type: "number", description: "Palette size. Default 24." },
         size: { type: "number", description: "Frame canvas size. Default 200." },
         includeRuns: { type: "boolean", description: "Include run_right/run_left rows. Default false." },
+        force: { type: "boolean", description: "Rebuild even when a matching .idxrle already exists. Default false." },
         chunkSize: { type: "number", description: "BLE payload bytes per chunk. Default 160." },
         delayMs: { type: "number", description: "Delay between chunks in milliseconds. Default 10." },
       },
@@ -141,6 +143,7 @@ async function packPet(args = {}) {
     colors: args.colors || 24,
     size: args.size || 200,
     includeRuns: Boolean(args.includeRuns),
+    force: Boolean(args.force),
   });
 }
 
@@ -150,6 +153,7 @@ async function packUploadPet(args = {}) {
     colors: args.colors || 24,
     size: args.size || 200,
     includeRuns: Boolean(args.includeRuns),
+    force: Boolean(args.force),
     chunkSize: args.chunkSize || 160,
     delayMs: args.delayMs || 10,
   });

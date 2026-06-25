@@ -119,11 +119,40 @@ async function inspectPackage(file) {
   return stdout.trim();
 }
 
+async function readCachedPackage({ petName, outPath, colors, size, includeRuns }) {
+  try {
+    const stat = await fs.stat(outPath);
+    const inspect = await inspectPackage(outPath);
+    const frames = Number(inspect.match(/^frames:\s+(\d+)/m)?.[1] || 0);
+    const actions = [];
+    for (const match of inspect.matchAll(/^\s+([a-zA-Z0-9_-]+): start=(\d+) count=(\d+)/gm)) {
+      actions.push({ name: match[1], start: Number(match[2]), count: Number(match[3]) });
+    }
+    return {
+      ok: true,
+      cached: true,
+      name: petName,
+      file: outPath,
+      bytes: stat.size,
+      colors,
+      size,
+      includeRuns,
+      frames,
+      actions,
+      packLog: "cache hit; reused existing .idxrle",
+      inspect,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function packCodexPet({
   name,
   colors = 24,
   size = 200,
   includeRuns = false,
+  force = false,
   outDir = path.join(process.cwd(), "packed"),
 } = {}) {
   const petName = safeName(name);
@@ -141,6 +170,11 @@ export async function packCodexPet({
   const outPath = path.join(workDir, `${petName}_${suffix}_${size}_${colors}.idxrle`);
   await fs.mkdir(workDir, { recursive: true });
 
+  if (!force) {
+    const cached = await readCachedPackage({ petName, outPath, colors, size, includeRuns });
+    if (cached) return cached;
+  }
+
   const extracted = await extractFrames({ petDir, framesDir, actionsPath, includeRuns, size });
   const { stdout } = await run("python3", [
     SKILL_PACKER,
@@ -157,6 +191,7 @@ export async function packCodexPet({
   const inspect = await inspectPackage(outPath);
   return {
     ok: true,
+    cached: false,
     name: petName,
     file: outPath,
     bytes: stat.size,

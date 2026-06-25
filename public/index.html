@@ -116,6 +116,51 @@
         color: #9fb0ca;
         font-size: 13px;
       }
+      .package-tools {
+        justify-content: space-between;
+      }
+      .package-list {
+        margin-top: 14px;
+        display: grid;
+        gap: 10px;
+        max-height: 430px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .package-card {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        border: 1px solid #263247;
+        border-radius: 8px;
+        background: #05070d;
+        padding: 10px;
+      }
+      .package-card img,
+      .package-preview-empty {
+        width: 76px;
+        height: 76px;
+        border-radius: 8px;
+        background: #02040a;
+        object-fit: contain;
+      }
+      .package-preview-empty {
+        display: grid;
+        place-items: center;
+        color: #4b5563;
+        font-size: 12px;
+      }
+      .package-title {
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+      .package-meta {
+        margin-top: 4px;
+        color: #9fb0ca;
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
       input {
         box-sizing: border-box;
         border: 1px solid #263247;
@@ -130,6 +175,17 @@
         }
         h1 {
           grid-column: auto;
+        }
+        .package-card {
+          grid-template-columns: 64px minmax(0, 1fr);
+        }
+        .package-card img,
+        .package-preview-empty {
+          width: 64px;
+          height: 64px;
+        }
+        .package-card button {
+          grid-column: 1 / -1;
         }
       }
     </style>
@@ -185,22 +241,22 @@
         </p>
       </section>
       <section>
-        <h2>RLE Upload</h2>
-        <div class="field">
-          <label for="rleFile">Pet package (.idxrle)</label>
-          <input id="rleFile" type="file" accept=".idxrle,application/octet-stream" />
+        <h2>Saved RLE Packages</h2>
+        <div class="row package-tools">
+          <button id="refreshPackages" class="secondary">Refresh</button>
+          <span id="packageCount" class="status">loading</span>
         </div>
-        <div class="field">
-          <label for="chunkSize">BLE chunk bytes</label>
-          <input id="chunkSize" type="number" min="32" max="480" value="160" />
+        <div id="packageList" class="package-list"></div>
+        <div class="row">
+          <div class="field">
+            <label for="chunkSize">BLE chunk bytes</label>
+            <input id="chunkSize" type="number" min="32" max="480" value="160" />
+          </div>
+          <div class="field">
+            <label for="delayMs">Delay per chunk (ms)</label>
+            <input id="delayMs" type="number" min="0" max="100" value="10" />
+          </div>
         </div>
-        <div class="field">
-          <label for="delayMs">Delay per chunk (ms)</label>
-          <input id="delayMs" type="number" min="0" max="100" value="10" />
-        </div>
-        <p class="row">
-          <button id="uploadRle">Upload RLE</button>
-        </p>
         <progress id="uploadProgress" value="0" max="100"></progress>
       </section>
       <section>
@@ -221,14 +277,13 @@
         </div>
         <p class="row">
           <label><input id="includeRuns" type="checkbox" /> include left/right run</label>
+          <label><input id="forcePack" type="checkbox" /> force repack</label>
         </p>
         <p class="row">
           <button id="packPet">Pack</button>
           <button id="packUploadPet">Pack + Upload</button>
-          <button id="refreshPackages" class="secondary">Refresh Saved</button>
         </p>
         <pre id="packResult"></pre>
-        <pre id="packageList"></pre>
       </section>
       <section style="grid-column: 1 / -1">
         <h2>Logs</h2>
@@ -248,17 +303,6 @@
           method: body === undefined ? "GET" : "POST",
           headers: { "content-type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || res.statusText);
-        return json;
-      }
-
-      async function uploadRaw(path, blob) {
-        const res = await fetch(path, {
-          method: "POST",
-          headers: { "content-type": "application/octet-stream" },
-          body: blob,
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || res.statusText);
@@ -285,6 +329,16 @@
         return first.length > 140 ? `${first.slice(0, 140)}...` : first;
       }
 
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        }[ch]));
+      }
+
       function packSummary(data) {
         return JSON.stringify({
           ok: data.ok,
@@ -293,6 +347,7 @@
           bytes: data.bytes,
           frames: data.frames,
           colors: data.colors,
+          cached: data.cached,
           actions: data.actions,
           upload: data.upload,
         }, null, 2);
@@ -345,22 +400,24 @@
         });
         setLast("watch text copied to JSON");
       };
-      $("uploadRle").onclick = async () => run("upload rle", async () => {
-        const file = $("rleFile").files[0];
-        if (!file) throw new Error("choose a .idxrle file first");
+      async function uploadSavedPackage(file) {
+        if (!file) throw new Error("package file is required");
         $("uploadProgress").value = 0;
-        const chunkSize = Number($("chunkSize").value || 160);
-        const delayMs = Number($("delayMs").value || 10);
-        const data = await uploadRaw(`/api/rle/upload?chunkSize=${chunkSize}&delayMs=${delayMs}`, file);
+        const data = await api("/api/rle/upload-file", {
+          file,
+          chunkSize: Number($("chunkSize").value || 160),
+          delayMs: Number($("delayMs").value || 10),
+        });
         $("uploadProgress").value = 100;
         return data;
-      });
+      }
       function packPayload() {
         return {
           name: $("petName").value.trim(),
           colors: Number($("packColors").value || 24),
           size: Number($("packSize").value || 200),
           includeRuns: $("includeRuns").checked,
+          force: $("forcePack").checked,
           chunkSize: Number($("chunkSize").value || 160),
           delayMs: Number($("delayMs").value || 10),
         };
@@ -381,9 +438,24 @@
       });
       async function loadPackages() {
         const data = await api("/api/rle/packages");
-        $("packageList").textContent = data.packages.length
-          ? data.packages.map((x) => `${(x.bytes / 1024).toFixed(1)} KB  ${x.relative}\n${x.file}`).join("\n\n")
-          : "No saved .idxrle packages yet.";
+        $("packageCount").textContent = `${data.packages.length} package${data.packages.length === 1 ? "" : "s"}`;
+        if (!data.packages.length) {
+          $("packageList").innerHTML = '<div class="package-meta">No saved .idxrle packages yet.</div>';
+          return data;
+        }
+        $("packageList").innerHTML = data.packages.map((x) => `
+          <div class="package-card">
+            ${x.previewUrl ? `<img src="${escapeHtml(x.previewUrl)}" alt="${escapeHtml(x.name)} preview" />` : '<div class="package-preview-empty">PNG</div>'}
+            <div>
+              <div class="package-title">${escapeHtml(x.name)}</div>
+              <div class="package-meta">${(x.bytes / 1024).toFixed(1)} KB<br />${escapeHtml(x.relative)}<br />${escapeHtml(new Date(x.updatedAt).toLocaleString())}</div>
+            </div>
+            <button class="uploadSaved" data-file="${escapeHtml(x.relative)}">Upload</button>
+          </div>
+        `).join("");
+        for (const btn of document.querySelectorAll(".uploadSaved")) {
+          btn.onclick = async () => run(`upload ${btn.dataset.file}`, () => uploadSavedPackage(btn.dataset.file));
+        }
         return data;
       }
       $("refreshPackages").onclick = async () => run("refresh saved", loadPackages);
