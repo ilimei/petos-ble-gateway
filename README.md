@@ -145,7 +145,13 @@ Finish:
 {"cmd":"rle.end"}
 ```
 
-The firmware writes chunks to `/pet.upload` first. Only after `rle.end` and a complete byte count does it replace `/pet.idxrle`, reload the package, and play `idle`.
+The firmware overwrites `/pet.idxrle` directly. During upload the watch hides pet frames and shows a progress bar. After `rle.end`, the gateway waits for the watch notification:
+
+```json
+{"event":"rle.complete","a":41,"b":778786}
+```
+
+The web/CLI upload should only be treated as successful after this watch-side acknowledgement. If the upload is interrupted, upload the `.idxrle` again.
 
 ## HTTP API
 

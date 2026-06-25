@@ -10,6 +10,7 @@ export class PetosBleClient extends EventEmitter {
     super();
     this.peripheral = null;
     this.rx = null;
+    this.tx = null;
     this.lastScan = [];
     this.connecting = false;
   }
@@ -21,6 +22,7 @@ export class PetosBleClient extends EventEmitter {
       device: this.peripheral ? this.describe(this.peripheral) : null,
       serviceUuid: PETOS.serviceUuid,
       rxUuid: PETOS.rxUuid,
+      txUuid: PETOS.txUuid,
       lastScan: this.lastScan,
     };
   }
@@ -99,15 +101,29 @@ export class PetosBleClient extends EventEmitter {
       this.peripheral.once("disconnect", () => {
         this.emit("log", "device disconnected");
         this.rx = null;
+        this.tx = null;
       });
 
       await target.connectAsync();
       const { characteristics } = await target.discoverSomeServicesAndCharacteristicsAsync(
         [PETOS.serviceUuid],
-        [PETOS.rxUuid],
+        [PETOS.rxUuid, PETOS.txUuid],
       );
       this.rx = characteristics.find((ch) => ch.uuid.toLowerCase() === PETOS.rxUuid);
       if (!this.rx) throw new Error("PetOS write characteristic not found");
+      this.tx = characteristics.find((ch) => ch.uuid.toLowerCase() === PETOS.txUuid);
+      if (this.tx) {
+        this.tx.on("data", (data) => {
+          const text = data.toString("utf8");
+          this.emit("log", `watch ${text}`);
+          try {
+            this.emit("watchMessage", JSON.parse(text));
+          } catch {
+            this.emit("watchMessage", { event: "text", text });
+          }
+        });
+        await this.tx.subscribeAsync();
+      }
       this.emit("log", `connected ${this.describe(target).name || target.id}`);
       return this.status();
     } finally {
@@ -118,7 +134,26 @@ export class PetosBleClient extends EventEmitter {
   async disconnect() {
     if (this.peripheral?.state === "connected") await this.peripheral.disconnectAsync();
     this.rx = null;
+    this.tx = null;
     return this.status();
+  }
+
+  waitForWatchEvent(events, timeoutMs = 20000) {
+    const wanted = new Set(Array.isArray(events) ? events : [events]);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.off("watchMessage", onMessage);
+        reject(new Error(`Timed out waiting for watch event: ${[...wanted].join(", ")}`));
+      }, timeoutMs);
+      const onMessage = (message) => {
+        if (!wanted.has(message.event)) return;
+        clearTimeout(timer);
+        this.off("watchMessage", onMessage);
+        if (message.event === "rle.error") reject(new Error(`watch RLE error: ${JSON.stringify(message)}`));
+        else resolve(message);
+      };
+      this.on("watchMessage", onMessage);
+    });
   }
 
   async sendJson(payload) {
@@ -137,7 +172,9 @@ export class PetosBleClient extends EventEmitter {
     }
     if (chunkSize < 32 || chunkSize > 480) throw new Error("chunkSize must be between 32 and 480");
 
+    const beginWait = this.tx ? this.waitForWatchEvent(["rle.begin", "rle.error"], 10000) : null;
     await this.sendJson({ cmd: "rle.begin", size: data.length });
+    if (beginWait) await beginWait;
     let sent = 0;
     while (sent < data.length) {
       const payload = data.subarray(sent, Math.min(sent + chunkSize, data.length));
@@ -150,8 +187,10 @@ export class PetosBleClient extends EventEmitter {
       onProgress?.({ sent, total: data.length, percent: sent / data.length });
       if (delayMs > 0) await delay(delayMs);
     }
+    const completeWait = this.tx ? this.waitForWatchEvent(["rle.complete", "rle.error"], 30000) : null;
     await this.sendJson({ cmd: "rle.end" });
+    const watch = completeWait ? await completeWait : null;
     this.emit("log", `uploaded RLE ${data.length} bytes`);
-    return { ok: true, bytes: data.length, status: this.status() };
+    return { ok: true, bytes: data.length, watch, status: this.status() };
   }
 }
