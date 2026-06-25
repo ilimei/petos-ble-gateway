@@ -83,6 +83,7 @@
         background: #05070d;
         color: #b9c7df;
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
       }
       .status {
         color: #38bdf8;
@@ -92,6 +93,11 @@
         margin: 12px 0;
         color: #fbbf24;
         min-height: 20px;
+        max-height: 72px;
+        overflow: auto;
+        overflow-wrap: anywhere;
+        font-size: 15px;
+        line-height: 1.35;
       }
       progress {
         width: 100%;
@@ -219,8 +225,10 @@
         <p class="row">
           <button id="packPet">Pack</button>
           <button id="packUploadPet">Pack + Upload</button>
+          <button id="refreshPackages" class="secondary">Refresh Saved</button>
         </p>
         <pre id="packResult"></pre>
+        <pre id="packageList"></pre>
       </section>
       <section style="grid-column: 1 / -1">
         <h2>Logs</h2>
@@ -271,6 +279,25 @@
         lastEl.textContent = text;
       }
 
+      function shortError(error) {
+        const text = error?.message || String(error);
+        const first = text.split("\n")[0];
+        return first.length > 140 ? `${first.slice(0, 140)}...` : first;
+      }
+
+      function packSummary(data) {
+        return JSON.stringify({
+          ok: data.ok,
+          name: data.name,
+          file: data.file,
+          bytes: data.bytes,
+          frames: data.frames,
+          colors: data.colors,
+          actions: data.actions,
+          upload: data.upload,
+        }, null, 2);
+      }
+
       function markAction(action) {
         currentAction = action;
         for (const btn of document.querySelectorAll("[data-action]")) {
@@ -287,7 +314,9 @@
           await refresh();
           return result;
         } catch (error) {
-          setLast(`${label} failed: ${error.message}`);
+          setLast(`${label} failed: ${shortError(error)}`);
+          logsEl.textContent += `${logsEl.textContent ? "\n" : ""}${new Date().toISOString()} ${error.message || error}`;
+          logsEl.scrollTop = logsEl.scrollHeight;
           throw error;
         }
       }
@@ -338,16 +367,26 @@
       }
       $("packPet").onclick = async () => run("pack pet", async () => {
         const data = await api("/api/rle/pack", packPayload());
-        $("packResult").textContent = JSON.stringify(data, null, 2);
+        $("packResult").textContent = packSummary(data);
+        await loadPackages();
         return data;
       });
       $("packUploadPet").onclick = async () => run("pack upload pet", async () => {
         $("uploadProgress").value = 0;
         const data = await api("/api/rle/pack-upload", packPayload());
         $("uploadProgress").value = 100;
-        $("packResult").textContent = JSON.stringify(data, null, 2);
+        $("packResult").textContent = packSummary(data.packed ? { ...data.packed, upload: data.upload } : data);
+        await loadPackages();
         return data;
       });
+      async function loadPackages() {
+        const data = await api("/api/rle/packages");
+        $("packageList").textContent = data.packages.length
+          ? data.packages.map((x) => `${(x.bytes / 1024).toFixed(1)} KB  ${x.relative}\n${x.file}`).join("\n\n")
+          : "No saved .idxrle packages yet.";
+        return data;
+      }
+      $("refreshPackages").onclick = async () => run("refresh saved", loadPackages);
       for (const btn of document.querySelectorAll("[data-action]")) {
         btn.onclick = async () => run(`action ${btn.dataset.action}`, async () => {
           markAction(btn.dataset.action);
@@ -368,7 +407,7 @@
           if (match) $("uploadProgress").value = Number(match[1]);
         }
       };
-      refresh().catch((error) => (logsEl.textContent = error.message));
+      refresh().then(loadPackages).catch((error) => (logsEl.textContent = error.message));
     </script>
   </body>
 </html>

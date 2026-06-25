@@ -1,5 +1,6 @@
 import express from "express";
 import http from "node:http";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
@@ -9,6 +10,7 @@ import { packCodexPet } from "./rle-pack.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "..", "public");
+const packedDir = path.join(__dirname, "..", "packed");
 
 const app = express();
 const server = http.createServer(app);
@@ -44,6 +46,35 @@ app.use(express.json({ limit: "64kb" }));
 app.use(express.static(publicDir));
 
 app.get("/api/status", asyncRoute(async () => ({ ok: true, petos: PETOS, logs, status: ble.status() })));
+app.get("/api/rle/packages", asyncRoute(async () => {
+  const packages = [];
+  async function walk(dir) {
+    let entries = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if (entry.isFile() && entry.name.endsWith(".idxrle")) {
+        const stat = await fs.stat(full);
+        packages.push({
+          name: entry.name,
+          file: full,
+          relative: path.relative(packedDir, full),
+          bytes: stat.size,
+          updatedAt: stat.mtime.toISOString(),
+        });
+      }
+    }
+  }
+  await walk(packedDir);
+  packages.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return { ok: true, packages };
+}));
 app.post("/api/scan", asyncRoute(async (req) => ({ ok: true, devices: await ble.scan(req.body || {}) })));
 app.post("/api/connect", asyncRoute(async (req) => ({ ok: true, status: await ble.connect(req.body || {}) })));
 app.post("/api/disconnect", asyncRoute(async () => ({ ok: true, status: await ble.disconnect() })));
@@ -66,15 +97,15 @@ app.post("/api/rle/upload", express.raw({ type: "application/octet-stream", limi
 }));
 app.post("/api/rle/pack", asyncRoute(async (req) => {
   const { name, colors = 24, size = 200, includeRuns = false } = req.body || {};
-  const result = await packCodexPet({ name, colors, size, includeRuns, outDir: path.join(__dirname, "..", "packed") });
+  const result = await packCodexPet({ name, colors, size, includeRuns, outDir: packedDir });
   log(`packed ${result.name} ${result.frames} frames ${result.bytes} bytes -> ${result.file}`);
   return result;
 }));
 app.post("/api/rle/pack-upload", asyncRoute(async (req) => {
   const { name, colors = 24, size = 200, includeRuns = false, chunkSize = 160, delayMs = 10 } = req.body || {};
-  const packed = await packCodexPet({ name, colors, size, includeRuns, outDir: path.join(__dirname, "..", "packed") });
+  const packed = await packCodexPet({ name, colors, size, includeRuns, outDir: packedDir });
   log(`packed ${packed.name} ${packed.frames} frames ${packed.bytes} bytes -> ${packed.file}`);
-  const data = await import("node:fs/promises").then((fs) => fs.readFile(packed.file));
+  const data = await fs.readFile(packed.file);
   let lastPct = -1;
   const upload = await ble.uploadRle(data, {
     chunkSize: Number(chunkSize),
