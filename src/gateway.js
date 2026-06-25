@@ -49,6 +49,20 @@ app.post("/api/disconnect", asyncRoute(async () => ({ ok: true, status: await bl
 app.post("/api/send", asyncRoute(async (req) => ble.sendJson(req.body)));
 app.post("/api/frame/:frame", asyncRoute(async (req) => ble.sendJson({ cmd: "pet.frame", value: Number(req.params.frame) })));
 app.post("/api/action/:action", asyncRoute(async (req) => ble.sendJson({ cmd: "pet.action", value: req.params.action })));
+app.post("/api/rle/upload", express.raw({ type: "application/octet-stream", limit: "2mb" }), asyncRoute(async (req) => {
+  let lastPct = -1;
+  return ble.uploadRle(req.body, {
+    chunkSize: Number(req.query.chunkSize || 160),
+    delayMs: Number(req.query.delayMs || 10),
+    onProgress: ({ sent, total, percent }) => {
+      const pct = Math.floor(percent * 100);
+      if (pct >= lastPct + 5 || sent === total) {
+        lastPct = pct;
+        log(`rle upload ${pct}% ${sent}/${total}`);
+      }
+    },
+  });
+}));
 app.post("/api/watch/text", asyncRoute(async (req) => {
   const { title = "PetOS", text = "" } = req.body || {};
   return ble.sendJson({ cmd: "watch.text", title, text });

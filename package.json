@@ -9,7 +9,8 @@
     "mcp": "node src/mcp-server.js",
     "scan": "node src/cli.js scan",
     "connect": "node src/cli.js connect",
-    "send": "node src/cli.js send"
+    "send": "node src/cli.js send",
+    "upload": "node src/cli.js upload"
   },
   "dependencies": {
     "@abandonware/noble": "^1.9.2-25",

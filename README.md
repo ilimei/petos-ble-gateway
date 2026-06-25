@@ -57,6 +57,7 @@ http://127.0.0.1:8787
 ```
 
 The page lets you scan, connect, send named actions, send a fixed frame, update the watch text page, or write raw JSON.
+It can also upload a `.idxrle` pet package to the watch over BLE.
 
 ## CLI Smoke Tests
 
@@ -76,6 +77,12 @@ Show a fixed frame:
 
 ```bash
 npm run send -- '{"cmd":"pet.frame","value":12}'
+```
+
+Upload a pet RLE package:
+
+```bash
+npm run upload -- /absolute/path/to/pet.idxrle
 ```
 
 ## BLE JSON Protocol
@@ -119,6 +126,26 @@ Supported actions in the current firmware:
 - `waiting`
 - `running`
 - `review`
+
+Upload a new pet package:
+
+```json
+{"cmd":"rle.begin","size":561600}
+```
+
+Then send binary BLE chunks:
+
+```text
+"RLEC" + uint32_le(offset) + raw bytes
+```
+
+Finish:
+
+```json
+{"cmd":"rle.end"}
+```
+
+The firmware writes chunks to `/pet.upload` first. Only after `rle.end` and a complete byte count does it replace `/pet.idxrle`, reload the package, and play `idle`.
 
 ## HTTP API
 
@@ -168,6 +195,14 @@ curl -X POST http://127.0.0.1:8787/api/watch/text \
   -d '{"title":"Market","text":"#22c55e CPO +2.3%#\n#f97316 NVDA +1.1%#"}'
 ```
 
+Upload an `.idxrle` file:
+
+```bash
+curl -X POST 'http://127.0.0.1:8787/api/rle/upload?chunkSize=160&delayMs=10' \
+  -H 'content-type: application/octet-stream' \
+  --data-binary @/absolute/path/to/pet.idxrle
+```
+
 ## MCP Server
 
 Start the gateway first:
@@ -197,6 +232,7 @@ Available MCP tools:
 - `petos_play_action`
 - `petos_show_frame`
 - `petos_show_text`
+- `petos_upload_rle`
 
 The MCP server calls the local gateway at `http://127.0.0.1:8787` by default. Override with:
 

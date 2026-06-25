@@ -93,6 +93,11 @@
         color: #fbbf24;
         min-height: 20px;
       }
+      progress {
+        width: 100%;
+        height: 12px;
+        accent-color: #10b981;
+      }
       .actions button {
         min-width: 88px;
       }
@@ -173,6 +178,25 @@
           <button id="copyWatchJson" class="secondary">Copy to JSON</button>
         </p>
       </section>
+      <section>
+        <h2>RLE Upload</h2>
+        <div class="field">
+          <label for="rleFile">Pet package (.idxrle)</label>
+          <input id="rleFile" type="file" accept=".idxrle,application/octet-stream" />
+        </div>
+        <div class="field">
+          <label for="chunkSize">BLE chunk bytes</label>
+          <input id="chunkSize" type="number" min="32" max="480" value="160" />
+        </div>
+        <div class="field">
+          <label for="delayMs">Delay per chunk (ms)</label>
+          <input id="delayMs" type="number" min="0" max="100" value="10" />
+        </div>
+        <p class="row">
+          <button id="uploadRle">Upload RLE</button>
+        </p>
+        <progress id="uploadProgress" value="0" max="100"></progress>
+      </section>
       <section style="grid-column: 1 / -1">
         <h2>Logs</h2>
         <pre id="logs"></pre>
@@ -191,6 +215,17 @@
           method: body === undefined ? "GET" : "POST",
           headers: { "content-type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || res.statusText);
+        return json;
+      }
+
+      async function uploadRaw(path, blob) {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: blob,
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || res.statusText);
@@ -256,6 +291,16 @@
         });
         setLast("watch text copied to JSON");
       };
+      $("uploadRle").onclick = async () => run("upload rle", async () => {
+        const file = $("rleFile").files[0];
+        if (!file) throw new Error("choose a .idxrle file first");
+        $("uploadProgress").value = 0;
+        const chunkSize = Number($("chunkSize").value || 160);
+        const delayMs = Number($("delayMs").value || 10);
+        const data = await uploadRaw(`/api/rle/upload?chunkSize=${chunkSize}&delayMs=${delayMs}`, file);
+        $("uploadProgress").value = 100;
+        return data;
+      });
       for (const btn of document.querySelectorAll("[data-action]")) {
         btn.onclick = async () => run(`action ${btn.dataset.action}`, async () => {
           markAction(btn.dataset.action);
@@ -272,6 +317,8 @@
         if (msg.item) {
           logsEl.textContent += `${logsEl.textContent ? "\n" : ""}${msg.item.at} ${msg.item.line}`;
           logsEl.scrollTop = logsEl.scrollHeight;
+          const match = msg.item.line.match(/rle upload (\d+)%/);
+          if (match) $("uploadProgress").value = Number(match[1]);
         }
       };
       refresh().catch((error) => (logsEl.textContent = error.message));

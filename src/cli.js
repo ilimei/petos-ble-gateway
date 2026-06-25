@@ -1,4 +1,5 @@
 import { PetosBleClient } from "./ble-client.js";
+import fs from "node:fs/promises";
 
 const ble = new PetosBleClient();
 ble.on("log", (line) => console.error(`[petos] ${line}`));
@@ -13,8 +14,23 @@ try {
   } else if (cmd === "send") {
     const payload = args.join(" ") || '{"cmd":"pet.action","value":"idle"}';
     console.log(JSON.stringify(await ble.sendJson(JSON.parse(payload)), null, 2));
+  } else if (cmd === "upload") {
+    const file = args[0];
+    if (!file) throw new Error("Usage: node src/cli.js upload path/to/pet.idxrle");
+    const data = await fs.readFile(file);
+    let lastPct = -1;
+    const result = await ble.uploadRle(data, {
+      onProgress: ({ sent, total, percent }) => {
+        const pct = Math.floor(percent * 100);
+        if (pct >= lastPct + 5 || sent === total) {
+          lastPct = pct;
+          console.error(`[petos] upload ${pct}% ${sent}/${total}`);
+        }
+      },
+    });
+    console.log(JSON.stringify(result, null, 2));
   } else {
-    console.error("Usage: node src/cli.js scan|connect|send '{\"cmd\":\"pet.action\",\"value\":\"review\"}'");
+    console.error("Usage: node src/cli.js scan|connect|send '{\"cmd\":\"pet.action\",\"value\":\"review\"}'|upload pet.idxrle");
     process.exit(2);
   }
 } catch (error) {

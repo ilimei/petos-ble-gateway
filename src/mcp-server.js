@@ -1,4 +1,5 @@
 import { DEFAULT_URL } from "./config.js";
+import fs from "node:fs/promises";
 
 const gatewayUrl = process.env.PETOS_GATEWAY_URL || DEFAULT_URL;
 let nextId = 1;
@@ -66,6 +67,19 @@ const tools = [
       required: ["text"],
     },
   },
+  {
+    name: "petos_upload_rle",
+    description: "Upload a local PTOSIDX1 .idxrle pet package to the watch over BLE.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "Absolute path to the .idxrle package." },
+        chunkSize: { type: "number", description: "BLE payload bytes per chunk. Default 160." },
+        delayMs: { type: "number", description: "Delay between chunks in milliseconds. Default 10." },
+      },
+      required: ["file"],
+    },
+  },
 ];
 
 async function request(path, body) {
@@ -73,6 +87,18 @@ async function request(path, body) {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+
+async function uploadFile(path, { chunkSize = 160, delayMs = 10 } = {}) {
+  const data = await fs.readFile(path);
+  const res = await fetch(`${gatewayUrl}/api/rle/upload?chunkSize=${chunkSize}&delayMs=${delayMs}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: data,
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
@@ -87,6 +113,7 @@ async function callTool(name, args = {}) {
   if (name === "petos_play_action") return request(`/api/action/${encodeURIComponent(args.action)}`, {});
   if (name === "petos_show_frame") return request(`/api/frame/${Number(args.frame)}`, {});
   if (name === "petos_show_text") return request("/api/watch/text", { title: args.title || "PetOS", text: args.text });
+  if (name === "petos_upload_rle") return uploadFile(args.file, args);
   throw new Error(`Unknown tool: ${name}`);
 }
 

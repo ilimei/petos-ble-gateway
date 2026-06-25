@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { PETOS } from "./config.js";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const RLE_CHUNK_MAGIC = Buffer.from("RLEC");
 
 export class PetosBleClient extends EventEmitter {
   constructor() {
@@ -126,5 +127,31 @@ export class PetosBleClient extends EventEmitter {
     await this.rx.writeAsync(Buffer.from(body, "utf8"), false);
     this.emit("log", `sent ${body}`);
     return { ok: true, sent: body, status: this.status() };
+  }
+
+  async uploadRle(input, { chunkSize = 160, delayMs = 10, onProgress } = {}) {
+    if (!this.rx || this.peripheral?.state !== "connected") await this.connect();
+    const data = Buffer.isBuffer(input) ? input : Buffer.from(input);
+    if (data.length < 16 || data.subarray(0, 8).toString("ascii") !== "PTOSIDX1") {
+      throw new Error("RLE upload expects a PTOSIDX1 .idxrle package");
+    }
+    if (chunkSize < 32 || chunkSize > 480) throw new Error("chunkSize must be between 32 and 480");
+
+    await this.sendJson({ cmd: "rle.begin", size: data.length });
+    let sent = 0;
+    while (sent < data.length) {
+      const payload = data.subarray(sent, Math.min(sent + chunkSize, data.length));
+      const packet = Buffer.allocUnsafe(8 + payload.length);
+      RLE_CHUNK_MAGIC.copy(packet, 0);
+      packet.writeUInt32LE(sent, 4);
+      payload.copy(packet, 8);
+      await this.rx.writeAsync(packet, false);
+      sent += payload.length;
+      onProgress?.({ sent, total: data.length, percent: sent / data.length });
+      if (delayMs > 0) await delay(delayMs);
+    }
+    await this.sendJson({ cmd: "rle.end" });
+    this.emit("log", `uploaded RLE ${data.length} bytes`);
+    return { ok: true, bytes: data.length, status: this.status() };
   }
 }
