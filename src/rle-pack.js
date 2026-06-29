@@ -160,7 +160,7 @@ export async function packCodexPet({
   colors = Number(colors || 24);
   size = Number(size || 200);
   if (colors < 2 || colors > 256) throw new Error("colors must be between 2 and 256");
-  if (size < 64 || size > 240) throw new Error("size must be between 64 and 240");
+  if (size < 64 || size > 360) throw new Error("size must be between 64 and 360");
 
   const petDir = await ensurePetInstalled(petName);
   const suffix = includeRuns ? "all" : "watch-no-lr";

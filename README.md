@@ -1,8 +1,8 @@
 # PetOS BLE Gateway
 
-PetOS BLE Gateway is a local Node.js bridge for controlling an ESP32-C3 PetOS watch over BLE.
+PetOS BLE Gateway is a local Node.js bridge for controlling PetOS ESP32 round watch devices over BLE.
 
-It exposes three control surfaces over the same BLE connection:
+It exposes three control surfaces over the same device session:
 
 - A browser dashboard for scanning, connecting, and sending pet commands.
 - An HTTP API for scripts and local tools.
@@ -13,28 +13,37 @@ Web UI / HTTP API / MCP tool
         |
         v
 Node.js gateway
-        |
+        | BLE JSON + notify state
         v
-BLE JSON write
+PetOS watch
         |
-        v
-PetOS-C3 watch
+        +-- optional WiFi RLE upload endpoint
 ```
+
+The gateway keeps Node and watch state synchronized from BLE notifications:
+connection profile, WiFi IP/ports, active upload progress, active pet slot,
+current tab, and audio state.
 
 ## Hardware/Firmware Assumptions
 
-The current firmware advertises as `PetOS-C3` and accepts JSON writes on:
+The current firmware family accepts JSON writes on:
 
 - Service UUID: `7f2a0001-4f6d-45f6-b805-2b0a7a0f9c01`
 - Write characteristic UUID: `7f2a0002-4f6d-45f6-b805-2b0a7a0f9c01`
+- Notify characteristic UUID: `7f2a0003-4f6d-45f6-b805-2b0a7a0f9c01`
 
-The tested target is an ESP32-C3 round watch board with a 240x240 GC9A01 display.
+The gateway detects the connected device profile from BLE advertising:
+
+- `PetOS-C3`: 240x240 C3 round watch, 200px / 24-color pet package target, no audio/IMU controls.
+- `PetOS-S3`: 360x360 SmartRing Plus, 360px / 48-color pet package target, audio, volume, brightness, IMU/auto-rotate, and pet scale controls.
+
+Device capabilities are returned by `/api/status` and `/api/capabilities`. The Web UI, HTTP API, and MCP tools use those capabilities to disable or reject unsupported actions.
 
 ## Requirements
 
 - macOS with Bluetooth enabled
 - Node.js 20+
-- A PetOS watch firmware advertising as `PetOS-C3`
+- A PetOS watch firmware advertising as `PetOS-C3` or `PetOS-S3`
 
 This project uses `@abandonware/noble` for BLE access. On macOS, the terminal or app running Node may need Bluetooth permission in System Settings.
 
@@ -56,8 +65,9 @@ Open:
 http://127.0.0.1:8787
 ```
 
-The page lets you scan, connect, send named actions, send a fixed frame, update the watch text page, or write raw JSON.
-It can also pack Codex pets into `.idxrle` packages, list saved packages with a preview frame, and upload a saved package to the watch over BLE.
+The page lets you scan, connect, see the detected device profile, send named actions, show a fixed frame, switch pet slots, switch watch tabs, show or clear a pet speech bubble, update the watch text page, or write raw JSON.
+It can also pack Codex pets into `.idxrle` packages, list saved packages with a preview frame, and upload a saved package to the watch over BLE or WiFi.
+If a package does not fit the connected device profile, its upload button is disabled with the reason shown in the card.
 
 ## CLI Smoke Tests
 
@@ -97,7 +107,8 @@ Pack and upload in one command:
 npm run pack-upload -- cloud-strife
 ```
 
-The packer uses the standard Codex pet `8x9` sprite sheet layout, removes empty cells, resizes frames to `200x200`, defaults to `24` colors, and excludes `run_right` / `run_left` for the watch package.
+The packer uses the standard Codex pet `8x9` sprite sheet layout, removes empty cells, and excludes `run_right` / `run_left` for the watch package.
+When connected, pack defaults follow the device profile: C3 defaults to `200x200` / `24` colors, S3 defaults to `360x360` / `48` colors.
 Packed packages are saved under `packed/<pet>/`. Running the same pet/settings again reuses the matching `.idxrle`; add `--force` to rebuild:
 
 ```bash
@@ -120,6 +131,26 @@ Show one fixed frame:
 
 ```json
 {"cmd":"pet.frame","value":12}
+```
+
+Show or clear a pet speech bubble:
+
+```json
+{"cmd":"pet.say","text":"Codex 收到了，开始思考"}
+```
+
+```json
+{"cmd":"pet.bubble.clear"}
+```
+
+Switch pet slot or UI tab:
+
+```json
+{"cmd":"pet.slot","value":1}
+```
+
+```json
+{"cmd":"ui.tab","value":"settings","animate":1}
 ```
 
 Show multiline text on the second watch page:
@@ -164,7 +195,7 @@ Finish:
 {"cmd":"rle.end"}
 ```
 
-The firmware overwrites `/pet.idxrle` directly. During upload the watch hides pet frames and shows a progress bar. After `rle.end`, the gateway waits for the watch notification:
+The firmware writes to the selected pet slot (`/pets/pet0.idxrle`, `/pets/pet1.idxrle`, or `/pets/pet2.idxrle`). During upload the watch hides pet frames and shows a progress bar plus an abort button. After `rle.end`, the gateway waits for the watch notification:
 
 ```json
 {"event":"rle.complete","a":41,"b":778786}
@@ -172,12 +203,20 @@ The firmware overwrites `/pet.idxrle` directly. During upload the watch hides pe
 
 The web/CLI upload should only be treated as successful after this watch-side acknowledgement. If the upload is interrupted, upload the `.idxrle` again.
 
+For larger S3 packages, the gateway can configure WiFi over BLE, receive the watch IP/ports from BLE notifications, and upload the `.idxrle` over the watch TCP pull protocol. BLE upload remains available as a fallback.
+
 ## HTTP API
 
 Status:
 
 ```bash
 curl http://127.0.0.1:8787/api/status
+```
+
+Capabilities only:
+
+```bash
+curl http://127.0.0.1:8787/api/capabilities
 ```
 
 Scan:
@@ -220,6 +259,42 @@ curl -X POST http://127.0.0.1:8787/api/watch/text \
   -d '{"title":"Market","text":"#22c55e CPO +2.3%#\n#f97316 NVDA +1.1%#"}'
 ```
 
+Show or clear the pet speech bubble:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/pet/say \
+  -H 'content-type: application/json' \
+  -d '{"text":"Codex 收到了，开始思考"}'
+
+curl -X POST http://127.0.0.1:8787/api/pet/bubble/clear \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+Switch pet slot or watch tab:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/pet/slot \
+  -H 'content-type: application/json' \
+  -d '{"value":1}'
+
+curl -X POST http://127.0.0.1:8787/api/tab \
+  -H 'content-type: application/json' \
+  -d '{"value":"settings"}'
+```
+
+Configure or disconnect watch WiFi:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/wifi/config \
+  -H 'content-type: application/json' \
+  -d '{"ssid":"YOUR_SSID","password":"YOUR_PASSWORD"}'
+
+curl -X POST http://127.0.0.1:8787/api/wifi/disconnect \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
 Upload an `.idxrle` file:
 
 ```bash
@@ -242,6 +317,14 @@ curl -X POST http://127.0.0.1:8787/api/rle/upload-file \
   -d '{"file":"cloud-strife/cloud-strife_watch-no-lr_200_24.idxrle","chunkSize":160,"delayMs":10}'
 ```
 
+Use WiFi for the same saved package:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/rle/upload-file \
+  -H 'content-type: application/json' \
+  -d '{"file":"cloud-strife/cloud-strife_watch-no-lr_360_48.idxrle","transport":"wifi","slot":0}'
+```
+
 Pack a Codex pet:
 
 ```bash
@@ -256,6 +339,30 @@ Pack and upload:
 curl -X POST http://127.0.0.1:8787/api/rle/pack-upload \
   -H 'content-type: application/json' \
   -d '{"name":"cloud-strife","colors":24,"size":200,"chunkSize":160,"delayMs":10}'
+```
+
+S3-only audio and display controls:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/audio/play/meizuo \
+  -H 'content-type: application/json' \
+  -d '{}'
+
+curl -X POST http://127.0.0.1:8787/api/audio/volume \
+  -H 'content-type: application/json' \
+  -d '{"value":80}'
+
+curl -X POST http://127.0.0.1:8787/api/display/brightness \
+  -H 'content-type: application/json' \
+  -d '{"value":80}'
+
+curl -X POST http://127.0.0.1:8787/api/display/autorotate \
+  -H 'content-type: application/json' \
+  -d '{"enabled":true}'
+
+curl -X POST http://127.0.0.1:8787/api/pet/scale \
+  -H 'content-type: application/json' \
+  -d '{"value":120}'
 ```
 
 ## MCP Server
@@ -285,11 +392,20 @@ Available MCP tools:
 - `petos_connect`
 - `petos_send_json`
 - `petos_play_action`
+- `petos_select_pet`
+- `petos_say`
+- `petos_clear_bubble`
+- `petos_open_tab`
 - `petos_show_frame`
 - `petos_show_text`
 - `petos_upload_rle`
 - `petos_pack_rle`
 - `petos_pack_upload_pet`
+- `petos_play_sound`
+- `petos_set_volume`
+- `petos_set_brightness`
+- `petos_set_auto_rotate`
+- `petos_set_pet_scale`
 
 The MCP server calls the local gateway at `http://127.0.0.1:8787` by default. Override with:
 

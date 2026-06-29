@@ -58,6 +58,32 @@
       button.secondary {
         background: #1f2937;
       }
+      button:disabled {
+        background: #374151;
+        color: #94a3b8;
+        cursor: not-allowed;
+      }
+      .badges {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin: 8px 0 12px;
+      }
+      .badge {
+        border: 1px solid #263247;
+        border-radius: 999px;
+        padding: 4px 8px;
+        color: #cbd5e1;
+        font-size: 12px;
+        background: #05070d;
+      }
+      .badge.on {
+        border-color: #0f766e;
+        color: #5eead4;
+      }
+      .badge.off {
+        color: #64748b;
+      }
       .row {
         display: flex;
         gap: 10px;
@@ -161,6 +187,12 @@
         font-size: 12px;
         overflow-wrap: anywhere;
       }
+      .package-card.incompatible {
+        opacity: 0.64;
+      }
+      .warn {
+        color: #fbbf24;
+      }
       input {
         box-sizing: border-box;
         border: 1px solid #263247;
@@ -196,12 +228,35 @@
       <section>
         <h2>Connection</h2>
         <div id="status" class="status">loading</div>
+        <div id="profileBadges" class="badges"></div>
         <div class="row">
           <button id="scan">Scan</button>
           <button id="connect">Connect</button>
           <button id="disconnect" class="secondary">Disconnect</button>
         </div>
         <pre id="devices"></pre>
+      </section>
+      <section>
+        <h2>WiFi Upload</h2>
+        <div id="wifiStatus" class="status">wifi=-</div>
+        <div id="wifiConnectedFields" class="row" style="display: none">
+          <button id="disconnectWifi" class="secondary">Disconnect WiFi</button>
+        </div>
+        <div id="wifiConfigFields">
+        <div class="row">
+          <div class="field">
+            <label for="wifiSsid">SSID</label>
+            <input id="wifiSsid" value="HUGEHARD" />
+          </div>
+          <div class="field">
+            <label for="wifiPassword">Password</label>
+            <input id="wifiPassword" type="password" placeholder="WiFi password" />
+          </div>
+        </div>
+        <p class="row">
+          <button id="sendWifiConfig">Send WiFi Config</button>
+        </p>
+        </div>
       </section>
       <section>
         <h2>Commands</h2>
@@ -221,6 +276,53 @@
           <button id="send">Send JSON</button>
           <input id="frame" type="number" min="0" max="40" value="0" />
           <button id="sendFrame" class="secondary">Send Frame</button>
+        </p>
+        <div class="row">
+          <div class="field">
+            <label for="bubbleText">Bubble text</label>
+            <input id="bubbleText" value="Codex 正在写代码" />
+          </div>
+          <button id="sendBubble" class="secondary">Say</button>
+          <button id="clearBubble" class="secondary">Clear</button>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="petSlot">Pet slot</label>
+            <select id="petSlot">
+              <option value="">current</option>
+              <option value="0">Pet 1</option>
+              <option value="1">Pet 2</option>
+              <option value="2">Pet 3</option>
+            </select>
+          </div>
+          <button id="sendPetSlot" class="secondary">Select Pet</button>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="watchTab">Watch tab</label>
+            <select id="watchTab">
+              <option value="pet">Pet</option>
+              <option value="watch">Watch</option>
+              <option value="imu">IMU</option>
+              <option value="sounds">Sounds</option>
+              <option value="settings">Settings</option>
+            </select>
+          </div>
+          <button id="sendTab" class="secondary">Open Tab</button>
+          <button id="prevTab" class="secondary">Prev</button>
+          <button id="nextTab" class="secondary">Next</button>
+        </div>
+      </section>
+      <section id="audioSection">
+        <h2>Audio</h2>
+        <div id="audioBadges" class="badges"></div>
+        <div id="soundButtons" class="row actions"></div>
+        <div class="field">
+          <label for="volumeValue">Volume</label>
+          <input id="volumeValue" type="number" min="0" max="100" value="80" />
+        </div>
+        <p class="row">
+          <button id="sendVolume">Set Volume</button>
         </p>
       </section>
       <section>
@@ -250,7 +352,7 @@
         <div class="row">
           <div class="field">
             <label for="chunkSize">BLE chunk bytes</label>
-            <input id="chunkSize" type="number" min="32" max="480" value="160" />
+            <input id="chunkSize" type="number" min="32" max="240" value="160" />
           </div>
           <div class="field">
             <label for="delayMs">Delay per chunk (ms)</label>
@@ -272,7 +374,7 @@
           </div>
           <div class="field">
             <label for="packSize">Size</label>
-            <input id="packSize" type="number" min="64" max="240" value="200" />
+            <input id="packSize" type="number" min="64" max="360" value="200" />
           </div>
         </div>
         <p class="row">
@@ -297,6 +399,17 @@
       const devicesEl = $("devices");
       const lastEl = $("last");
       let currentAction = "";
+      let currentProfile = null;
+      let uploadBusy = false;
+
+      const fallbackProfile = {
+        label: "Unknown PetOS device",
+        display: { width: 240, height: 240 },
+        pet: { defaultSize: 200, maxSize: 200, defaultColors: 24, maxColors: 24 },
+        actions: ["idle", "waving", "jumping", "failed", "waiting", "running", "review"],
+        capabilities: {},
+        sounds: [],
+      };
 
       async function api(path, body) {
         const res = await fetch(path, {
@@ -310,17 +423,102 @@
       }
 
       function showStatus(status) {
-        statusEl.textContent = `adapter=${status.adapterState} connected=${status.connected} device=${status.device?.name || "-"}`;
+        currentProfile = status.profile || fallbackProfile;
+        const upload = status.watch?.upload;
+        const uploadText = upload?.active
+          ? ` uploading=${Math.floor(((upload.received || 0) * 100) / (upload.total || 1))}%`
+          : upload?.status && upload.status !== "idle"
+            ? ` upload=${upload.status}`
+            : "";
+        const petText = status.watch?.petSlot !== null && status.watch?.petSlot !== undefined ? ` pet=${Number(status.watch.petSlot) + 1}` : "";
+        const tabText = status.watch?.tab?.name ? ` tab=${status.watch.tab.name}` : "";
+        statusEl.textContent = `adapter=${status.adapterState} connected=${status.connected} device=${status.device?.name || "-"} profile=${currentProfile.label}${petText}${tabText}${uploadText}`;
+        if (status.watch?.petSlot !== null && status.watch?.petSlot !== undefined) $("petSlot").value = String(status.watch.petSlot);
+        if (status.watch?.tab?.name) $("watchTab").value = status.watch.tab.name;
+        const wifiConnected = Boolean(status.wifi?.connected && status.wifi?.ip);
+        $("wifiStatus").textContent = wifiConnected
+          ? `wifi=${status.wifi.ip}:${status.wifi.port || 8788}`
+          : `wifi=${status.wifi?.error || "-"}`;
+        $("wifiConnectedFields").style.display = wifiConnected ? "" : "none";
+        $("wifiConfigFields").style.display = wifiConnected ? "none" : "";
+        if (upload?.total) {
+          const percent = Math.floor(((upload.received || 0) * 100) / upload.total);
+          $("uploadProgress").value = Math.max(0, Math.min(100, percent));
+        }
+        renderCapabilities(currentProfile);
+        applyProfileControls(currentProfile);
+      }
+
+      function setUploadBusy(value) {
+        uploadBusy = Boolean(value);
+        for (const btn of document.querySelectorAll(".uploadSaved")) btn.disabled = uploadBusy || btn.dataset.disabled === "1";
+        $("packUploadPet").disabled = uploadBusy;
+        $("refreshPackages").disabled = uploadBusy;
+      }
+
+      function badge(label, on = true) {
+        return `<span class="badge ${on ? "on" : "off"}">${escapeHtml(label)}</span>`;
+      }
+
+      function renderCapabilities(profile) {
+        const caps = profile.capabilities || {};
+        $("profileBadges").innerHTML = [
+          badge(`${profile.display?.width || "-"}x${profile.display?.height || "-"}`),
+          badge(`pet ${profile.pet?.defaultSize || "-"} / ${profile.pet?.defaultColors || "-"}c`),
+          badge("RLE", caps.rleUpload),
+          badge("text", caps.watchText),
+          badge("audio", caps.audio),
+          badge("mic", caps.mic),
+          badge("IMU", caps.imu),
+          badge("rotate", caps.autoRotate),
+        ].join("");
+        $("audioBadges").innerHTML = [
+          badge("speaker", caps.audio),
+          badge("volume", caps.volume),
+          badge("sounds", caps.sounds),
+        ].join("");
+      }
+
+      function applyProfileControls(profile) {
+        const caps = profile.capabilities || {};
+        $("audioSection").style.display = caps.audio || caps.sounds || caps.volume ? "" : "none";
+        $("packSize").max = profile.pet?.maxSize || 360;
+        $("packColors").max = profile.pet?.maxColors || 256;
+        if (!$("packSize").dataset.touched) $("packSize").value = profile.pet?.defaultSize || 200;
+        if (!$("packColors").dataset.touched) $("packColors").value = profile.pet?.defaultColors || 24;
+        for (const btn of document.querySelectorAll("[data-action]")) {
+          btn.disabled = !profile.actions?.includes(btn.dataset.action);
+        }
+        renderSoundButtons(profile);
+      }
+
+      function renderSoundButtons(profile) {
+        const caps = profile.capabilities || {};
+        const sounds = profile.sounds || [];
+        $("soundButtons").innerHTML = sounds.length ? sounds.map((sound) => (
+          `<button data-sound="${escapeHtml(sound.name)}" ${caps.sounds ? "" : "disabled"}>${escapeHtml(sound.label || sound.name)}</button>`
+        )).join("") : '<span class="package-meta">No sound actions for this device.</span>';
+        for (const btn of document.querySelectorAll("[data-sound]")) {
+          btn.onclick = async () => run(`sound ${btn.dataset.sound}`, () => api(`/api/audio/play/${encodeURIComponent(btn.dataset.sound)}`, {}));
+        }
       }
 
       async function refresh() {
         const data = await api("/api/status");
         showStatus(data.status);
+        setUploadBusy(data.uploadInProgress);
         logsEl.textContent = data.logs.map((x) => `${x.at} ${x.line}`).join("\n");
       }
 
       function setLast(text) {
         lastEl.textContent = text;
+      }
+
+      function setUploadProgress({ transport = "upload", percent = 0, sent = 0, total = 0 }) {
+        $("uploadProgress").value = percent;
+        const sentKb = (sent / 1024).toFixed(1);
+        const totalKb = (total / 1024).toFixed(1);
+        setLast(`${transport} upload ${percent}% ${sentKb}/${totalKb} KB`);
       }
 
       function shortError(error) {
@@ -381,17 +579,24 @@
         devicesEl.textContent = JSON.stringify(data.devices, null, 2);
         return data;
       });
-      $("connect").onclick = async () => run("connect", () => api("/api/connect", {}));
-      $("disconnect").onclick = async () => run("disconnect", () => api("/api/disconnect", {}));
+      $("connect").onclick = async () => run("connect", () => api("/api/connect", {})).then(loadPackages);
+      $("disconnect").onclick = async () => run("disconnect", () => api("/api/disconnect", {})).then(loadPackages);
       $("send").onclick = async () => run("send json", async () => {
         const payload = JSON.parse($("json").value);
         return api("/api/send", payload);
       });
       $("sendFrame").onclick = async () => run(`frame ${Number($("frame").value)}`, () => api(`/api/frame/${Number($("frame").value)}`, {}));
+      $("sendBubble").onclick = async () => run("bubble", () => api("/api/pet/say", { text: $("bubbleText").value }));
+      $("clearBubble").onclick = async () => run("clear bubble", () => api("/api/pet/bubble/clear", {}));
       $("sendWatchText").onclick = async () => run("watch text", () => api("/api/watch/text", {
         title: $("watchTitle").value,
         text: $("watchText").value,
       }));
+      $("sendVolume").onclick = async () => run("volume", () => api("/api/audio/volume", {
+        value: Number($("volumeValue").value || 80),
+      }));
+      $("packSize").oninput = () => ($("packSize").dataset.touched = "1");
+      $("packColors").oninput = () => ($("packColors").dataset.touched = "1");
       $("copyWatchJson").onclick = () => {
         $("json").value = JSON.stringify({
           cmd: "watch.text",
@@ -400,16 +605,25 @@
         });
         setLast("watch text copied to JSON");
       };
-      async function uploadSavedPackage(file) {
+      async function uploadSavedPackage(file, transport = "ble") {
+        if (uploadBusy) throw new Error("upload already in progress");
+        setUploadBusy(true);
         if (!file) throw new Error("package file is required");
         $("uploadProgress").value = 0;
-        const data = await api("/api/rle/upload-file", {
-          file,
-          chunkSize: Number($("chunkSize").value || 160),
-          delayMs: Number($("delayMs").value || 10),
-        });
-        $("uploadProgress").value = 100;
-        return data;
+        try {
+          const slot = $("petSlot").value;
+          const data = await api("/api/rle/upload-file", {
+            file,
+            chunkSize: Number($("chunkSize").value || 160),
+            delayMs: Number($("delayMs").value || 10),
+            slot: slot === "" ? null : Number(slot),
+            transport,
+          });
+          $("uploadProgress").value = 100;
+          return data;
+        } finally {
+          setUploadBusy(false);
+        }
       }
       function packPayload() {
         return {
@@ -420,6 +634,8 @@
           force: $("forcePack").checked,
           chunkSize: Number($("chunkSize").value || 160),
           delayMs: Number($("delayMs").value || 10),
+          slot: $("petSlot").value === "" ? null : Number($("petSlot").value),
+          transport: "ble",
         };
       }
       $("packPet").onclick = async () => run("pack pet", async () => {
@@ -429,36 +645,71 @@
         return data;
       });
       $("packUploadPet").onclick = async () => run("pack upload pet", async () => {
+        if (uploadBusy) throw new Error("upload already in progress");
+        setUploadBusy(true);
         $("uploadProgress").value = 0;
-        const data = await api("/api/rle/pack-upload", packPayload());
-        $("uploadProgress").value = 100;
-        $("packResult").textContent = packSummary(data.packed ? { ...data.packed, upload: data.upload } : data);
-        await loadPackages();
-        return data;
+        try {
+          const data = await api("/api/rle/pack-upload", packPayload());
+          $("uploadProgress").value = 100;
+          $("packResult").textContent = packSummary(data.packed ? { ...data.packed, upload: data.upload } : data);
+          await loadPackages();
+          return data;
+        } finally {
+          setUploadBusy(false);
+        }
       });
+      $("sendWifiConfig").onclick = async () => run("wifi config", () => api("/api/wifi/config", {
+        ssid: $("wifiSsid").value,
+        password: $("wifiPassword").value,
+      }));
+      $("disconnectWifi").onclick = async () => run("wifi disconnect", () => api("/api/wifi/disconnect", {}));
       async function loadPackages() {
         const data = await api("/api/rle/packages");
+        if (data.profile) {
+          currentProfile = data.profile;
+          renderCapabilities(currentProfile);
+          applyProfileControls(currentProfile);
+        }
         $("packageCount").textContent = `${data.packages.length} package${data.packages.length === 1 ? "" : "s"}`;
         if (!data.packages.length) {
           $("packageList").innerHTML = '<div class="package-meta">No saved .idxrle packages yet.</div>';
           return data;
         }
         $("packageList").innerHTML = data.packages.map((x) => `
-          <div class="package-card">
+          <div class="package-card ${x.compatibility?.ok ? "" : "incompatible"}">
             ${x.previewUrl ? `<img src="${escapeHtml(x.previewUrl)}" alt="${escapeHtml(x.name)} preview" />` : '<div class="package-preview-empty">PNG</div>'}
             <div>
               <div class="package-title">${escapeHtml(x.name)}</div>
-              <div class="package-meta">${(x.bytes / 1024).toFixed(1)} KB<br />${escapeHtml(x.relative)}<br />${escapeHtml(new Date(x.updatedAt).toLocaleString())}</div>
+              <div class="package-meta">
+                ${(x.bytes / 1024).toFixed(1)} KB
+                ${x.meta ? `<br />${x.meta.width}x${x.meta.height} ${x.meta.colorCount}c ${x.meta.frameCount}f` : ""}
+                <br />${escapeHtml(x.relative)}
+                <br />${escapeHtml(new Date(x.updatedAt).toLocaleString())}
+                ${x.compatibility?.ok ? "" : `<br /><span class="warn">${escapeHtml((x.compatibility?.issues || []).join("; "))}</span>`}
+              </div>
             </div>
-            <button class="uploadSaved" data-file="${escapeHtml(x.relative)}">Upload</button>
+            <button class="uploadSaved" data-file="${escapeHtml(x.relative)}" data-transport="ble" data-disabled="${x.compatibility?.ok ? "0" : "1"}" ${x.compatibility?.ok && !uploadBusy ? "" : "disabled"}>BLE</button>
+            <button class="uploadSaved" data-file="${escapeHtml(x.relative)}" data-transport="wifi" data-disabled="${x.compatibility?.ok ? "0" : "1"}" ${x.compatibility?.ok && !uploadBusy ? "" : "disabled"}>WiFi</button>
           </div>
         `).join("");
         for (const btn of document.querySelectorAll(".uploadSaved")) {
-          btn.onclick = async () => run(`upload ${btn.dataset.file}`, () => uploadSavedPackage(btn.dataset.file));
+          btn.onclick = async () => run(`${btn.dataset.transport} upload ${btn.dataset.file}`, () => uploadSavedPackage(btn.dataset.file, btn.dataset.transport));
         }
         return data;
       }
       $("refreshPackages").onclick = async () => run("refresh saved", loadPackages);
+      $("sendPetSlot").onclick = async () => run("pet slot", async () => {
+        const slot = $("petSlot").value;
+        if (slot === "") throw new Error("choose Pet 1/2/3 to select a slot");
+        $("json").value = JSON.stringify({ cmd: "pet.slot", value: Number(slot) });
+        return api("/api/pet/slot", { value: Number(slot) });
+      });
+      $("sendTab").onclick = async () => run(`tab ${$("watchTab").value}`, async () => {
+        $("json").value = JSON.stringify({ cmd: "ui.tab", value: $("watchTab").value });
+        return api("/api/tab", { value: $("watchTab").value });
+      });
+      $("prevTab").onclick = async () => run("tab prev", () => api("/api/tab", { value: "prev" }));
+      $("nextTab").onclick = async () => run("tab next", () => api("/api/tab", { value: "next" }));
       for (const btn of document.querySelectorAll("[data-action]")) {
         btn.onclick = async () => run(`action ${btn.dataset.action}`, async () => {
           markAction(btn.dataset.action);
@@ -471,12 +722,28 @@
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.status) showStatus(msg.status);
+        if ("uploadInProgress" in msg) setUploadBusy(msg.uploadInProgress);
         if (msg.logs) logsEl.textContent = msg.logs.map((x) => `${x.at} ${x.line}`).join("\n");
+        if (msg.type === "progress") setUploadProgress(msg);
         if (msg.item) {
           logsEl.textContent += `${logsEl.textContent ? "\n" : ""}${msg.item.at} ${msg.item.line}`;
           logsEl.scrollTop = logsEl.scrollHeight;
           const match = msg.item.line.match(/rle upload (\d+)%/);
           if (match) $("uploadProgress").value = Number(match[1]);
+          const watchMatch = msg.item.line.match(/watch (\\{.*\\})/);
+          if (watchMatch) {
+            try {
+              const watch = JSON.parse(watchMatch[1]);
+              if (watch.event === "rle.progress" && watch.b > 0) {
+                $("uploadProgress").value = Math.floor((watch.a * 100) / watch.b);
+              }
+              if (watch.event === "rle.error" || watch.event === "rle.abort") {
+                setLast(`${watch.event}: upload stopped on watch`);
+              }
+            } catch {
+              // Ignore non-JSON watch log lines.
+            }
+          }
         }
       };
       refresh().then(loadPackages).catch((error) => (logsEl.textContent = error.message));
